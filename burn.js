@@ -7,8 +7,9 @@ require('dotenv').config();
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL;
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 const TARGET_TOKEN_MINT = process.env.TARGET_TOKEN_MINT;
-const INTERVAL_MINUTES = 30;
-const MIN_BALANCE_SOL = 0.01 * 1e9; // 0.01 SOL
+const INTERVAL = process.env.INTERVAL || '30m';
+const BURN_RATIO = parseFloat(process.env.BURN_RATIO) || 0.01;
+const MIN_BALANCE_SOL = BURN_RATIO * 1e9; // 0.01 SOL
 
 const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
 const wallet = Keypair.fromSecretKey(new Uint8Array(JSON.parse(PRIVATE_KEY)));
@@ -65,6 +66,6 @@ async function buyAndBurnToken() {
 }
 
 // Schedule the buy and burn every 30 minutes
-schedule.scheduleJob(`*/${INTERVAL_MINUTES} * * * *`, buyAndBurnToken);
+schedule.scheduleJob(`*/${parseInt(INTERVAL)} * * * *`, buyAndBurnToken);
 
 console.log('Bot is running...');
