@@ -1,5 +1,3 @@
-### ✅ **Updated README with Code Format for Easy Copying:**
-
 ```markdown
 <div align="center">
   <img src="https://incineratorlabs.xyz/128x.png" alt="Incinerator Labs Logo" />
