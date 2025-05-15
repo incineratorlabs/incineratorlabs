@@ -1,3 +1,6 @@
+### ✅ **Updated README with Code Format for Easy Copying:**
+
+```markdown
 <div align="center">
   <img src="https://incineratorlabs.xyz/128x.png" alt="Incinerator Labs Logo" />
 </div>
@@ -6,92 +9,161 @@
 
 Automated buy-and-burn protocol for decentralized ecosystems. Incinerator Labs leverages algorithmic trading and tokenomics to systematically purchase and burn tokens, reducing supply and enhancing token value.
 
+```
+
 ## 🚀 Features
-- Automated buy and burn every specified interval.
+
+```
+- Automated buy and burn at specified intervals.
+- Real swap execution using Serum DEX.
 - Configurable burn ratios and buy intervals.
-- Dynamic supply control.
-- Solana blockchain integration.
-- Wallet balance monitoring to optimize the burn cycle.
+- Dynamic supply control and token burning.
+- Solana blockchain integration with SPL token support.
+- Wallet balance monitoring to optimize burn cycles.
+```
+
+---
 
 ## 📦 Installation
+
+```
 1. Clone the repository:
 
-```bash
 git clone https://github.com/yourusername/incineratorlabs.git
-```
 
 2. Navigate to the project directory:
 
-```bash
 cd incineratorlabs
-```
 
 3. Install dependencies:
 
-```bash
 npm install
+
+4. Install additional global dependencies:
+
+npm install -g pm2
 ```
+
+---
 
 ## ⚡ Usage
-1. Configure environment variables in `.env`:
 
 ```
+1. Configure environment variables in `.env`:
+
 SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
-PRIVATE_KEY=your_private_key_here
+PRIVATE_KEY=your_base58_private_key_here
 TARGET_TOKEN_MINT=your_token_mint_address
 BURN_RATIO=0.01
 INTERVAL=30m
 ```
 
-2. Install **PM2** globally to run the bot in the background:
+```
+2. Start the bot using PM2:
 
-```bash
-npm install -g pm2
+pm2 start bot.js --name incineratorlabs
 ```
 
-3. Start the bot using PM2:
-
-```bash
-pm2 start burn.js --name incineratorlabs
 ```
+3. View logs:
 
-4. View logs:
-
-```bash
 pm2 logs incineratorlabs
 ```
 
-5. Stop the bot:
+```
+4. Stop the bot:
 
-```bash
 pm2 stop incineratorlabs
 ```
 
-6. Restart the bot:
+```
+5. Restart the bot:
 
-```bash
 pm2 restart incineratorlabs
 ```
 
+---
+
 ## 🔧 Configuration
-- **SOLANA_RPC_URL**: Solana RPC URL, e.g., `https://api.mainnet-beta.solana.com`
-- **PRIVATE_KEY**: The private key of the wallet executing the buy and burn (JSON Array format).
-- **TARGET_TOKEN_MINT**: The token mint address of the target token.
-- **BURN_RATIO**: Minimum SOL to leave in the wallet after purchasing tokens.
-- **INTERVAL**: Time interval for each buy and burn cycle (e.g., `30m`, `1h`).
+
+```
+| Variable       | Description                          | Example                          |
+|----------------|--------------------------------------|----------------------------------|
+| `SOLANA_RPC_URL` | Solana RPC URL (Mainnet or Devnet)  | `https://api.mainnet-beta.solana.com` |
+| `PRIVATE_KEY`  | Base58 encoded private key of the wallet executing the swap and burn | `your_base58_key_here` |
+| `TARGET_TOKEN_MINT` | Token mint address to target for buying and burning | `your_token_mint_address` |
+| `BURN_RATIO`   | Minimum SOL to keep in the wallet after each cycle | `0.01` |
+| `INTERVAL`     | Time interval for each buy and burn cycle | `30m`, `1h` |
+```
+
+---
 
 ## 🛠️ Tech Stack
-- Node.js
-- Solana Web3.js
-- Axios
-- PM2
+
+```
+- Node.js - Backend runtime
+- Solana Web3.js - Solana blockchain interaction
+- Serum DEX - Swap execution
+- SPL Token - Token operations
+- Axios - HTTP requests
+- PM2 - Process management
+```
+
+---
+
+## 💡 How It Works
+
+```
+- The bot checks the SOL balance at each interval and calculates the amount available for swapping.
+- Executes a swap using Serum DEX, exchanging SOL for the target token.
+- Burns the acquired tokens immediately after the swap.
+- Monitors and adjusts the burn amount based on available token balance to avoid over-burning.
+```
+
+---
 
 ## 🤝 Contributing
-- Fork the repository
-- Create a feature branch (`git checkout -b feature/YourFeature`)
-- Commit your changes (`git commit -m 'Add some feature'`)
-- Push to the branch (`git push origin feature/YourFeature`)
-- Open a pull request
+
+```
+1. Fork the repository
+2. Create a feature branch:
+
+git checkout -b feature/YourFeature
+
+3. Commit your changes:
+
+git commit -m "Add new feature"
+
+4. Push to the branch:
+
+git push origin feature/YourFeature
+
+5. Open a pull request
+```
+
+---
+
+## 🛡️ Security
+
+```
+- Keep your `.env` file secure and **never expose your private key**.
+- Use a dedicated wallet for testing on Devnet before deploying on Mainnet.
+- Regularly monitor and update dependencies to mitigate security risks.
+```
+
+---
 
 ## 📄 License
-This project is licensed under the MIT License.
+
+```
+This project is licensed under the MIT License. See the [LICENSE](./LICENSE) file for more details.
+```
+
+```
+
+---
+
+### ✅ **Notes:**
+- The above version keeps everything in a single, easy-to-copy code block format.
+- If any further adjustments are required, let me know. 👍🙂
+```
