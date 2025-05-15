@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="https://incineratorlabs.xyz/128x.png" alt="Incinerator Labs Logo" />
+</div>
+
 # Incinerator Labs
 
 Automated buy-and-burn protocol for decentralized ecosystems. Incinerator Labs leverages algorithmic trading and tokenomics to systematically purchase and burn tokens, reducing supply and enhancing token value.
