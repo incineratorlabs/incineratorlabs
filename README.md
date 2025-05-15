@@ -33,13 +33,13 @@ cd incineratorlabs
 3. **Install dependencies:**
 
 ```bash
-npm install
+npm install @project-serum/serum @solana/spl-token @solana/web3.js cross-fetch bs58
 ```
 
 4. **Install additional global dependencies:**
 
 ```bash
-npm install -g pm2
+npm install @project-serum/serum @solana/spl-token @solana/web3.js cross-fetch bs58 -g pm2
 ```
 
 ---
