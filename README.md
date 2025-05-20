@@ -1,6 +1,17 @@
 <div align="center">
   <img src="https://incineratorlabs.xyz/128x.png" alt="Incinerator Labs Logo" />
 </div>
+<br>
+<p align="center">
+  <a href="https://incineratorlabs.xyz/">
+    <img src="https://img.shields.io/badge/website-incineratorlabs.xyz-blue?style=flat-square" alt="Website" />
+  </a>
+  <a href="https://x.com/incineratorlabs">
+    <img src="https://img.shields.io/badge/x-@incineratorlabs-black?style=flat-square&logo=twitter" alt="X / Twitter" />
+  </a>
+</p>
+
+
 
 # Incinerator Labs
 
