@@ -20,6 +20,7 @@ Automated buy-and-burn protocol for decentralized ecosystems. Incinerator Labs l
 ## 🚀 Features
 - Automated buy and burn at specified intervals.
 - Real swap execution using Serum DEX.
+- Optional Pump.fun creator reward claiming.
 - Configurable burn ratios and buy intervals.
 - Dynamic supply control and token burning.
 - Solana blockchain integration with SPL token support.
@@ -65,6 +66,7 @@ PRIVATE_KEY=your_base58_private_key_here
 TARGET_TOKEN_MINT=your_token_mint_address
 BURN_RATIO=0.01
 INTERVAL=30m
+PUMPSWAP_REWARD=true
 ```
 
 2. **Start the bot using PM2:**
@@ -95,13 +97,14 @@ pm2 restart incineratorlabs
 
 ## 🔧 Configuration
 
-| Variable       | Description                          | Example                          |
-|----------------|--------------------------------------|----------------------------------|
-| `SOLANA_RPC_URL` | Solana RPC URL (Mainnet or Devnet)  | `https://api.mainnet-beta.solana.com` |
-| `PRIVATE_KEY`  | Base58 encoded private key of the wallet executing the swap and burn | `your_base58_key_here` |
-| `TARGET_TOKEN_MINT` | Token mint address to target for buying and burning | `your_token_mint_address` |
-| `BURN_RATIO`   | Minimum SOL to keep in the wallet after each cycle | `0.01` |
-| `INTERVAL`     | Time interval for each buy and burn cycle | `30m`, `1h` |
+| Variable           | Description                                                  | Example                                    |
+|--------------------|--------------------------------------------------------------|--------------------------------------------|
+| `SOLANA_RPC_URL`   | Solana RPC URL (Mainnet or Devnet)                          | `https://api.mainnet-beta.solana.com`     |
+| `PRIVATE_KEY`      | Base58 encoded private key of the wallet                    | `your_base58_key_here`                     |
+| `TARGET_TOKEN_MINT`| Token mint address to target for buying and burning        | `your_token_mint_address`                  |
+| `BURN_RATIO`       | Minimum SOL to keep in the wallet after each cycle         | `0.01`                                     |
+| `INTERVAL`         | Time interval for each buy and burn cycle                  | `30m`, `1h`                                 |
+| `PUMPSWAP_REWARD`  | Set to `true` to claim Pump.fun creator reward before burn | `true` or `false`                          |
 
 ---
 
@@ -117,6 +120,7 @@ pm2 restart incineratorlabs
 
 ## 💡 How It Works
 - The bot checks the SOL balance at each interval and calculates the amount available for swapping.
+- If enabled, it first claims any Pump.fun creator rewards.
 - Executes a swap using Serum DEX, exchanging SOL for the target token.
 - Burns the acquired tokens immediately after the swap.
 - Monitors and adjusts the burn amount based on available token balance to avoid over-burning.
