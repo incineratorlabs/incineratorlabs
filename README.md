@@ -119,7 +119,7 @@ pm2 restart incineratorlabs
 ## 💡 How It Works
 - The bot checks the SOL balance at each interval and calculates the amount available for swapping.
 - If enabled, it first claims any Pump.fun creator rewards.
-- Executes a swap using Serum DEX, exchanging SOL for the target token.
+- Executes a swap, exchanging SOL for the target token.
 - Burns the acquired tokens immediately after the swap.
 - Monitors and adjusts the burn amount based on available token balance to avoid over-burning.
 
