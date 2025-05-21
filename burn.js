@@ -1,4 +1,4 @@
-// Combined Buy, Claim, and Burn Script for IncineratorLabs
+// Combined Buy, Claim, and Burn Script for IncineratorLabs (Jupiter Swap Integrated)
 
 const {
   Connection,
@@ -6,7 +6,8 @@ const {
   PublicKey,
   Transaction,
   TransactionInstruction,
-  sendAndConfirmTransaction
+  sendAndConfirmTransaction,
+  VersionedTransaction
 } = require('@solana/web3.js');
 const {
   getAssociatedTokenAddress,
@@ -14,9 +15,9 @@ const {
   getMint,
   getAccount
 } = require('@solana/spl-token');
-const { Market } = require('@project-serum/serum');
 const schedule = require('node-schedule');
 const bs58 = require('bs58');
+const axios = require('axios');
 require('dotenv').config();
 
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL;
@@ -49,13 +50,17 @@ async function claimPumpFunCreatorFee() {
   const instructionData = Buffer.from("1416567bc61cdb84", "hex");
   const keys = [
     { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
-    { pubkey: new PublicKey("DX1r8pi2X5nj5WzoELVfeR7uDDAg9L4hjHPfKJi6FB5C"), isSigner: false, isWritable: true },
+    { pubkey: new PublicKey("9PRQYGFwcGhaMBx3KiPy62MSzaFyETDZ5U8Qr2HAavTX"), isSigner: false, isWritable: true },
     { pubkey: new PublicKey("11111111111111111111111111111111"), isSigner: false, isWritable: false },
     { pubkey: new PublicKey("Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1"), isSigner: false, isWritable: false },
+    { pubkey: new PublicKey("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"), isSigner: false, isWritable: false },
   ];
 
   const instruction = new TransactionInstruction({ keys, programId, data: instructionData });
-  const tx = new Transaction().add(instruction);
+  const tx = new Transaction({
+    recentBlockhash: (await connection.getLatestBlockhash()).blockhash,
+    feePayer: wallet.publicKey,
+  }).add(instruction);
 
   try {
     const sig = await sendAndConfirmTransaction(connection, tx, [wallet]);
@@ -65,29 +70,44 @@ async function claimPumpFunCreatorFee() {
   }
 }
 
-async function executeSerumSwap(fromMint, toMint, amount) {
+async function executeJupiterSwap(inputMint, outputMint, amountLamports) {
   try {
-    console.log(`Swapping ${amount / 1e9} SOL to ${toMint.toBase58()}`);
-    const marketAddress = new PublicKey('9wFFkjE1zY8mTukCTLPD9PLaEjfkdFkrb2GZg1iGLSbp');
-    const market = await Market.load(connection, marketAddress, {}, new PublicKey('4ckmDgGzLR5ZPPyCG1hn5q3uYYa3APoc2jFhR7zKeFzt'));
+    const inAmount = amountLamports.toString();
 
-    const payer = wallet.publicKey;
-    const transaction = new Transaction();
-    const order = await market.makePlaceOrderInstruction({
-      owner: wallet,
-      payer,
-      side: 'buy',
-      price: 1,
-      size: amount / 1e9,
-      orderType: 'limit',
+    console.log(`Swapping via Jupiter: ${inputMint.toBase58()} → ${outputMint.toBase58()} using ${Number(amountLamports) / 1e9} SOL`);
+
+    const quoteResponse = await axios.get('https://quote-api.jup.ag/v6/quote', {
+      params: {
+        inputMint: inputMint.toBase58(),
+        outputMint: outputMint.toBase58(),
+        amount: inAmount,
+        slippageBps: 50,
+      },
     });
 
-    transaction.add(order);
-    const signature = await connection.sendTransaction(transaction, [wallet]);
-    console.log(`Swap transaction sent: ${signature}`);
-    return signature;
+    const quote = quoteResponse.data;
+
+    if (!quote.routes || quote.routes.length === 0) {
+      console.error('Jupiter swap error: No route found for this token.');
+      return null;
+    }
+
+    const swapResponse = await axios.post('https://quote-api.jup.ag/v6/swap', {
+      route: quote.routes[0],
+      userPublicKey: wallet.publicKey.toBase58(),
+      wrapUnwrapSOL: true,
+    });
+
+    const swapTx = swapResponse.data.swapTransaction;
+    const txBuffer = Buffer.from(swapTx, 'base64');
+    const transaction = VersionedTransaction.deserialize(txBuffer);
+
+    const sig = await connection.sendTransaction(transaction, [wallet]);
+    console.log('Jupiter swap sent:', sig);
+    return sig;
+
   } catch (error) {
-    console.error('Serum swap error:', error.message);
+    console.error('Jupiter swap error:', error.response?.data || error.message);
     return null;
   }
 }
@@ -112,12 +132,11 @@ async function buyAndBurnToken() {
 
     const solMint = new PublicKey('So11111111111111111111111111111111111111112');
     const targetMint = new PublicKey(TARGET_TOKEN_MINT);
-    const swapTx = await executeSerumSwap(solMint, targetMint, BigInt(amountToUse));
+    const swapTx = await executeJupiterSwap(solMint, targetMint, BigInt(amountToUse));
     if (!swapTx) return;
 
     const associatedTokenAccount = await getAssociatedTokenAddress(targetMint, wallet.publicKey);
     const mintInfo = await getMint(connection, targetMint);
-    const decimals = mintInfo.decimals;
     const tokenBalance = await getTokenAccountBalance(associatedTokenAccount);
 
     if (tokenBalance === BigInt(0)) {
