@@ -19,7 +19,6 @@ Automated buy-and-burn protocol for decentralized ecosystems. Incinerator Labs l
 
 ## 🚀 Features
 - Automated buy and burn at specified intervals.
-- Real swap execution using Serum DEX.
 - Optional Pump.fun creator reward claiming.
 - Configurable burn ratios and buy intervals.
 - Dynamic supply control and token burning.
@@ -45,13 +44,13 @@ cd incineratorlabs
 3. **Install dependencies:**
 
 ```bash
-npm install @project-serum/serum @solana/spl-token @solana/web3.js cross-fetch bs58
+npm install @solana/spl-token @solana/web3.js cross-fetch bs58
 ```
 
 4. **Install additional global dependencies:**
 
 ```bash
-npm install @project-serum/serum @solana/spl-token @solana/web3.js cross-fetch bs58 -g pm2
+npm install @solana/spl-token @solana/web3.js cross-fetch bs58 -g pm2
 ```
 
 ---
@@ -111,7 +110,6 @@ pm2 restart incineratorlabs
 ## 🛠️ Tech Stack
 - Node.js - Backend runtime
 - Solana Web3.js - Solana blockchain interaction
-- Serum DEX - Swap execution
 - SPL Token - Token operations
 - Axios - HTTP requests
 - PM2 - Process management
