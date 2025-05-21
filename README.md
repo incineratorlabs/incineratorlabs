@@ -102,7 +102,7 @@ pm2 restart incineratorlabs
 | `PRIVATE_KEY`      | Base58 encoded private key of the wallet                    | `your_base58_key_here`                     |
 | `TARGET_TOKEN_MINT`| Token mint address to target for buying and burning        | `your_token_mint_address`                  |
 | `BURN_RATIO`       | Minimum SOL to keep in the wallet after each cycle         | `0.01`                                     |
-| `INTERVAL`         | Time interval for each buy and burn cycle                  | `30m`, `1h`                                 |
+| `INTERVAL`         | Time interval for each buy and burn cycle                  | `10m`, `30m`                                 |
 | `PUMPSWAP_REWARD`  | Set to `true` to claim Pump.fun creator reward before burn | `true` or `false`                          |
 
 ---
