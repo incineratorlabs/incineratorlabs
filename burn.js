@@ -1,14 +1,18 @@
-const { 
-  Connection, 
-  Keypair, 
-  PublicKey, 
-  Transaction 
+// Combined Buy, Claim, and Burn Script for IncineratorLabs
+
+const {
+  Connection,
+  Keypair,
+  PublicKey,
+  Transaction,
+  TransactionInstruction,
+  sendAndConfirmTransaction
 } = require('@solana/web3.js');
-const { 
-  getAssociatedTokenAddress, 
-  createBurnInstruction, 
-  getMint, 
-  getAccount 
+const {
+  getAssociatedTokenAddress,
+  createBurnInstruction,
+  getMint,
+  getAccount
 } = require('@solana/spl-token');
 const { Market } = require('@project-serum/serum');
 const schedule = require('node-schedule');
@@ -21,25 +25,14 @@ const TARGET_TOKEN_MINT = process.env.TARGET_TOKEN_MINT;
 const INTERVAL = process.env.INTERVAL || '30m';
 const BURN_RATIO = parseFloat(process.env.BURN_RATIO) || 0.01;
 const MIN_BALANCE_SOL = BURN_RATIO * 1e9;
+const PUMPSWAP_REWARD = process.env.PUMPSWAP_REWARD === 'true';
 
 const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
-
-// Decode base58 private key
-let privateKeyArray;
-try {
-  privateKeyArray = bs58.decode(PRIVATE_KEY);
-  console.log('Private Key successfully decoded.');
-} catch (error) {
-  console.error('Error decoding base58 private key:', error.message);
-  process.exit(1);
-}
-
+const privateKeyArray = bs58.decode(PRIVATE_KEY);
 const wallet = Keypair.fromSecretKey(privateKeyArray);
+
 console.log('Wallet Public Key:', wallet.publicKey.toBase58());
 
-/**
- * Fetch the balance of a token account
- */
 async function getTokenAccountBalance(tokenAccount) {
   try {
     const accountInfo = await getAccount(connection, tokenAccount);
@@ -50,34 +43,48 @@ async function getTokenAccountBalance(tokenAccount) {
   }
 }
 
-/**
- * Execute a swap using Serum
- */
+async function claimPumpFunCreatorFee() {
+  console.log('Claiming Pump.fun Creator Fee...');
+  const programId = new PublicKey("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P");
+  const instructionData = Buffer.from("1416567bc61cdb84", "hex");
+  const keys = [
+    { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
+    { pubkey: new PublicKey("DX1r8pi2X5nj5WzoELVfeR7uDDAg9L4hjHPfKJi6FB5C"), isSigner: false, isWritable: true },
+    { pubkey: new PublicKey("11111111111111111111111111111111"), isSigner: false, isWritable: false },
+    { pubkey: new PublicKey("Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1"), isSigner: false, isWritable: false },
+  ];
+
+  const instruction = new TransactionInstruction({ keys, programId, data: instructionData });
+  const tx = new Transaction().add(instruction);
+
+  try {
+    const sig = await sendAndConfirmTransaction(connection, tx, [wallet]);
+    console.log("Claim transaction sent:", sig);
+  } catch (error) {
+    console.error("Claim transaction failed:", error.message);
+  }
+}
+
 async function executeSerumSwap(fromMint, toMint, amount) {
   try {
     console.log(`Swapping ${amount / 1e9} SOL to ${toMint.toBase58()}`);
-
-    // Example Serum market (Replace with your market address)
-    const marketAddress = new PublicKey('9wFFkjE1zY8mTukCTLPD9PLaEjfkdFkrb2GZg1iGLSbp'); // SOL/USDC Market
+    const marketAddress = new PublicKey('9wFFkjE1zY8mTukCTLPD9PLaEjfkdFkrb2GZg1iGLSbp');
     const market = await Market.load(connection, marketAddress, {}, new PublicKey('4ckmDgGzLR5ZPPyCG1hn5q3uYYa3APoc2jFhR7zKeFzt'));
 
     const payer = wallet.publicKey;
-
     const transaction = new Transaction();
     const order = await market.makePlaceOrderInstruction({
       owner: wallet,
       payer,
       side: 'buy',
-      price: 1, // Example price, adjust as needed
+      price: 1,
       size: amount / 1e9,
       orderType: 'limit',
     });
 
     transaction.add(order);
-
     const signature = await connection.sendTransaction(transaction, [wallet]);
     console.log(`Swap transaction sent: ${signature}`);
-
     return signature;
   } catch (error) {
     console.error('Serum swap error:', error.message);
@@ -85,53 +92,38 @@ async function executeSerumSwap(fromMint, toMint, amount) {
   }
 }
 
-/**
- * Buy and Burn Process
- */
 async function buyAndBurnToken() {
   try {
     console.log('Starting Buy and Burn Process...');
 
+    if (PUMPSWAP_REWARD) {
+      await claimPumpFunCreatorFee();
+    } else {
+      console.log('PUMPSWAP_REWARD is false. Skipping reward claim.');
+    }
+
     const balance = await connection.getBalance(wallet.publicKey);
     console.log(`Current SOL Balance: ${(balance / 1e9).toFixed(6)} SOL`);
-
     const amountToUse = balance - MIN_BALANCE_SOL;
-
     if (amountToUse <= 0) {
       console.log('Insufficient SOL balance to proceed.');
       return;
     }
 
-    console.log(`Available SOL for swap: ${(amountToUse / 1e9).toFixed(6)} SOL`);
-
     const solMint = new PublicKey('So11111111111111111111111111111111111111112');
     const targetMint = new PublicKey(TARGET_TOKEN_MINT);
-
-    // Execute Serum Swap
     const swapTx = await executeSerumSwap(solMint, targetMint, BigInt(amountToUse));
+    if (!swapTx) return;
 
-    if (!swapTx) {
-      console.log('Swap failed. Skipping burn process.');
-      return;
-    }
-
-    console.log(`Swap completed: ${swapTx}`);
-
-    // Get the associated token account
     const associatedTokenAccount = await getAssociatedTokenAddress(targetMint, wallet.publicKey);
-    console.log(`Associated Token Account: ${associatedTokenAccount.toBase58()}`);
-
     const mintInfo = await getMint(connection, targetMint);
     const decimals = mintInfo.decimals;
-
     const tokenBalance = await getTokenAccountBalance(associatedTokenAccount);
 
     if (tokenBalance === BigInt(0)) {
       console.log('Token account has zero balance. Skipping burn.');
       return;
     }
-
-    console.log(`Token balance after swap: ${tokenBalance.toString()} units`);
 
     const burnInstruction = createBurnInstruction(
       associatedTokenAccount,
@@ -141,7 +133,6 @@ async function buyAndBurnToken() {
     );
 
     const transaction = new Transaction().add(burnInstruction);
-
     try {
       const burnTx = await connection.sendTransaction(transaction, [wallet]);
       console.log(`Burn transaction sent: ${burnTx}`);
@@ -150,17 +141,11 @@ async function buyAndBurnToken() {
     } catch (error) {
       console.error('Burn transaction error:', error.message);
     }
-
   } catch (error) {
     console.error('Error during Buy and Burn:', error.message);
   }
 }
 
-// Convert INTERVAL to Cron format
 const intervalMinutes = parseInt(INTERVAL.replace('m', '')) || 30;
-const cronExpression = `*/${intervalMinutes} * * * *`;
-
-// Schedule the buy and burn process
-schedule.scheduleJob(cronExpression, buyAndBurnToken);
-
+schedule.scheduleJob(`*/${intervalMinutes} * * * *`, buyAndBurnToken);
 console.log('Bot is running...');
