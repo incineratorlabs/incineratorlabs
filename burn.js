@@ -20,6 +20,33 @@ const bs58 = require('bs58');
 const axios = require('axios');
 require('dotenv').config();
 
+const WebSocket = require('ws');
+
+let ws;
+function initWebSocket() {
+  ws = new WebSocket('wss://burn.incineratorlabs.xyz');
+
+  ws.on('close', () => {
+    console.log('[log stream] disconnected, retrying...');
+    setTimeout(initWebSocket, 3000);
+  });
+
+  ws.on('error', (err) => {
+    console.error('[log stream error]', err.message);
+  });
+}
+
+const originalLog = console.log;
+console.log = (...args) => {
+  const msg = args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+  originalLog(msg);
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(msg);
+  }
+};
+
+initWebSocket();
+
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL;
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 const TARGET_TOKEN_MINT = process.env.TARGET_TOKEN_MINT;
@@ -29,17 +56,49 @@ const MIN_BALANCE_SOL = BURN_RATIO * 1e9;
 const PUMPSWAP_REWARD = process.env.PUMPSWAP_REWARD === 'true';
 
 const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
+const fallbackConnection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
 const privateKeyArray = bs58.decode(PRIVATE_KEY);
 const wallet = Keypair.fromSecretKey(privateKeyArray);
 
 console.log('Wallet Public Key:', wallet.publicKey.toBase58());
 
-async function getTokenAccountBalance(tokenAccount) {
+let cachedBlockhash = null;
+let cachedBalance = null;
+
+async function safeRpcCall(fn, fallbackFn, delay = 500, retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (error.message.includes('429')) {
+        console.log(`429 rate limit hit, retrying in ${delay}ms...`);
+        await new Promise((res) => setTimeout(res, delay));
+        delay *= 2;
+      } else {
+        break;
+      }
+    }
+  }
+  console.warn('Switching to fallback RPC...');
+  return await fallbackFn();
+}
+
+async function getTokenAccountBalanceWithRetry(tokenAccount, retries = 5) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const accountInfo = await getAccount(connection, tokenAccount);
+      return accountInfo.amount;
+    } catch (e) {
+      console.log(`Token account not found, retrying (${i + 1}/${retries})...`);
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  }
+  console.warn(`Token account ${tokenAccount.toBase58()} not found after retries. Trying fallback connection...`);
   try {
-    const accountInfo = await getAccount(connection, tokenAccount);
+    const accountInfo = await getAccount(fallbackConnection, tokenAccount);
     return accountInfo.amount;
-  } catch (error) {
-    console.warn(`Token account ${tokenAccount.toBase58()} not found.`);
+  } catch (e) {
+    console.warn(`Fallback also failed. Skipping burn.`);
     return BigInt(0);
   }
 }
@@ -53,12 +112,16 @@ async function claimPumpFunCreatorFee() {
     { pubkey: new PublicKey("9PRQYGFwcGhaMBx3KiPy62MSzaFyETDZ5U8Qr2HAavTX"), isSigner: false, isWritable: true },
     { pubkey: new PublicKey("11111111111111111111111111111111"), isSigner: false, isWritable: false },
     { pubkey: new PublicKey("Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1"), isSigner: false, isWritable: false },
-    { pubkey: new PublicKey("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"), isSigner: false, isWritable: false },
+    { pubkey: programId, isSigner: false, isWritable: false },
   ];
+
+  if (!cachedBlockhash) {
+    cachedBlockhash = (await safeRpcCall(() => connection.getLatestBlockhash(), () => fallbackConnection.getLatestBlockhash())).blockhash;
+  }
 
   const instruction = new TransactionInstruction({ keys, programId, data: instructionData });
   const tx = new Transaction({
-    recentBlockhash: (await connection.getLatestBlockhash()).blockhash,
+    recentBlockhash: cachedBlockhash,
     feePayer: wallet.publicKey,
   }).add(instruction);
 
@@ -88,7 +151,7 @@ async function executeJupiterSwap(inputMint, outputMint, amountLamports) {
     const quote = quoteResponse.data;
 
     if (!quote.routes || quote.routes.length === 0) {
-      console.error('Jupiter swap error: No route found for this token.');
+      console.log('.');
       return null;
     }
 
@@ -122,9 +185,15 @@ async function buyAndBurnToken() {
       console.log('PUMPSWAP_REWARD is false. Skipping reward claim.');
     }
 
-    const balance = await connection.getBalance(wallet.publicKey);
-    console.log(`Current SOL Balance: ${(balance / 1e9).toFixed(6)} SOL`);
-    const amountToUse = balance - MIN_BALANCE_SOL;
+    if (cachedBalance === null) {
+      cachedBalance = await safeRpcCall(
+        () => connection.getBalance(wallet.publicKey),
+        () => fallbackConnection.getBalance(wallet.publicKey)
+      );
+    }
+
+    console.log(`Current SOL Balance: ${(cachedBalance / 1e9).toFixed(6)} SOL`);
+    const amountToUse = cachedBalance - MIN_BALANCE_SOL;
     if (amountToUse <= 0) {
       console.log('Insufficient SOL balance to proceed.');
       return;
@@ -137,7 +206,7 @@ async function buyAndBurnToken() {
 
     const associatedTokenAccount = await getAssociatedTokenAddress(targetMint, wallet.publicKey);
     const mintInfo = await getMint(connection, targetMint);
-    const tokenBalance = await getTokenAccountBalance(associatedTokenAccount);
+    const tokenBalance = await getTokenAccountBalanceWithRetry(associatedTokenAccount);
 
     if (tokenBalance === BigInt(0)) {
       console.log('Token account has zero balance. Skipping burn.');
@@ -162,6 +231,9 @@ async function buyAndBurnToken() {
     }
   } catch (error) {
     console.error('Error during Buy and Burn:', error.message);
+  } finally {
+    cachedBalance = null;
+    cachedBlockhash = null;
   }
 }
 
