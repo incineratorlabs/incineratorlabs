@@ -90,28 +90,32 @@ const PUMP_FUN_PROGRAM_ID = new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5u
 async function claimPumpFunCreatorFee() {
   log.action('Claiming Pump.fun Creator Fee...');
   try {
-    const vaultTokenAccount = new PublicKey("9PRQYGFwcGhaMBx3KiPy62MSzaFyETDZ5U8Qr2HAavTX");
-    const vaultAuthority = new PublicKey("Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1");
+    const tx = new Transaction();
 
     const instruction = new TransactionInstruction({
-      keys: [
-        { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
-        { pubkey: vaultTokenAccount, isSigner: false, isWritable: true },
-        { pubkey: new PublicKey("11111111111111111111111111111111"), isSigner: false, isWritable: false },
-        { pubkey: vaultAuthority, isSigner: false, isWritable: false },
-        { pubkey: PUMP_FUN_PROGRAM_ID, isSigner: false, isWritable: false }
-      ],
       programId: PUMP_FUN_PROGRAM_ID,
-      data: Buffer.from("1416567bc61cdb84", "hex"),
+      keys: [
+        { pubkey: wallet.publicKey, isSigner: true, isWritable: true }, // creator
+        { pubkey: new PublicKey('9PRQYGFwcGhaMBx3KiPy62MSzaFyETDZ5U8Qr2HAavTX'), isSigner: false, isWritable: true }, // creator vault
+        { pubkey: new PublicKey('5vDRAWviVHWHQqYDMvQTZ5EoD2EBH9GkBhPbTSgWAjYC'), isSigner: false, isWritable: true }, // creator token ATA (WSOL)
+        { pubkey: new PublicKey('FUNDp8XqEorEosg2ybmJMM6myah5Vy41WszyPKzf1gHJ'), isSigner: false, isWritable: true }, // fee vault
+        { pubkey: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'), isSigner: false, isWritable: false }, // token program
+        { pubkey: new PublicKey('11111111111111111111111111111111'), isSigner: false, isWritable: false }, // system program
+        { pubkey: new PublicKey('SysvarRent111111111111111111111111111111111'), isSigner: false, isWritable: false }, // rent (may or may not be needed)
+        { pubkey: new PublicKey('Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1'), isSigner: false, isWritable: false } // event authority
+      ],
+      data: Buffer.from("1416567bc61cdb84", "hex"), // anchor discriminator for CollectCreatorFee
     });
 
-    const tx = new Transaction().add(instruction);
+    tx.add(instruction);
     const sig = await sendAndConfirmTransaction(connection, tx, [wallet]);
-    log.success("✅ Claim transaction sent:", sig);
+    log.success("✅ Creator fee claimed:", sig);
   } catch (error) {
     log.error("❌ Claim transaction failed:", error.message);
   }
 }
+
+
 
 async function executePumpPortalSwap(outputMint, amountInSol) {
   log.action(`🧠 Swapping via PumpPortal: ${(amountInSol / 1e9).toFixed(4)} SOL → ${outputMint.toBase58()}`);
