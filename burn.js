@@ -1,3 +1,5 @@
+// Combined Buy, Claim, and Burn Script for IncineratorLabs (Jupiter Swap Integrated with Fancy Logs + Retry)
+
 const {
   Connection,
   Keypair,
@@ -10,7 +12,8 @@ const {
 const {
   getAssociatedTokenAddress,
   createBurnInstruction,
-  getMint
+  getMint,
+  getAccount
 } = require('@solana/spl-token');
 const schedule = require('node-schedule');
 const bs58 = require('bs58');
@@ -19,23 +22,46 @@ require('dotenv').config();
 
 const WebSocket = require('ws');
 
-// ✅ WebSocket Log Setup
 let ws;
 function initWebSocket() {
   ws = new WebSocket('wss://burn.incineratorlabs.xyz');
-  ws.on('open', () => console.log('[log stream] connected'));
+
+  ws.on('open', () => {
+    logInfo('[log stream] connected to dashboard');
+  });
+
   ws.on('close', () => {
-    console.log('[log stream] disconnected, retrying...');
+    logRetry('[log stream] disconnected, retrying...');
     setTimeout(initWebSocket, 3000);
   });
-  ws.on('error', err => console.error('[log stream error]', err.message));
+
+  ws.on('error', (err) => {
+    logError('[log stream error]', err.message);
+  });
 }
+
 const originalLog = console.log;
-console.log = (...args) => {
+function fancyLog(type, ...args) {
+  const emojiMap = {
+    info: 'ℹ️',
+    success: '🚀',
+    error: '❌',
+    retry: '⏳',
+  };
+  const emoji = emojiMap[type] || '';
   const msg = args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
-  originalLog(msg);
-  if (ws && ws.readyState === WebSocket.OPEN) ws.send(msg);
-};
+  const fullMsg = `${emoji} ${msg}`;
+  originalLog(fullMsg);
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(fullMsg);
+  }
+}
+
+global.logInfo = (...args) => fancyLog('info', ...args);
+global.logSuccess = (...args) => fancyLog('success', ...args);
+global.logError = (...args) => fancyLog('error', ...args);
+global.logRetry = (...args) => fancyLog('retry', ...args);
+
 initWebSocket();
 
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL;
@@ -47,24 +73,23 @@ const MIN_BALANCE_SOL = BURN_RATIO * 1e9;
 const PUMPSWAP_REWARD = process.env.PUMPSWAP_REWARD === 'true';
 
 const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
-const wallet = Keypair.fromSecretKey(bs58.decode(PRIVATE_KEY));
+const privateKeyArray = bs58.decode(PRIVATE_KEY);
+const wallet = Keypair.fromSecretKey(privateKeyArray);
 
-console.log('Wallet Public Key:', wallet.publicKey.toBase58());
+logInfo('Wallet Public Key:', wallet.publicKey.toBase58());
 
-let cachedBlockhash = null;
-let lastBlockhashTs = 0;
-async function getSafeBlockhash() {
-  const now = Date.now();
-  if (!cachedBlockhash || now - lastBlockhashTs > 30000) {
-    const { blockhash } = await connection.getLatestBlockhash();
-    cachedBlockhash = blockhash;
-    lastBlockhashTs = now;
+async function getTokenAccountBalance(tokenAccount) {
+  try {
+    const accountInfo = await getAccount(connection, tokenAccount);
+    return accountInfo.amount;
+  } catch (error) {
+    logError(`Token account ${tokenAccount.toBase58()} not found.`);
+    return BigInt(0);
   }
-  return cachedBlockhash;
 }
 
 async function claimPumpFunCreatorFee() {
-  console.log('🧾 Claiming Pump.fun Creator Fee...');
+  logInfo('Claiming Pump.fun Creator Fee...');
   const programId = new PublicKey("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P");
   const instructionData = Buffer.from("1416567bc61cdb84", "hex");
   const keys = [
@@ -76,118 +101,126 @@ async function claimPumpFunCreatorFee() {
   ];
 
   const instruction = new TransactionInstruction({ keys, programId, data: instructionData });
-  const blockhash = (await connection.getLatestBlockhash()).blockhash;
-
   const tx = new Transaction({
-    recentBlockhash: blockhash,
+    recentBlockhash: (await connection.getLatestBlockhash()).blockhash,
     feePayer: wallet.publicKey,
   }).add(instruction);
 
   try {
-    const sig = await sendAndConfirmTransaction(connection, tx, [wallet], {
-      skipPreflight: true,
-      commitment: 'confirmed'
-    });
-    console.log('✅ Claim TX sent:', sig);
+    const sig = await sendAndConfirmTransaction(connection, tx, [wallet]);
+    logSuccess("Claim transaction sent:", sig);
   } catch (error) {
-    console.error('❌ Claim failed:', error.message);
+    logError("Claim transaction failed:", error.message);
   }
 }
 
+async function fetchWithRetry(url, options = {}, maxRetries = 5, baseDelay = 500) {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await axios(url, options);
+    } catch (error) {
+      if (error.response?.status === 429) {
+        const delay = baseDelay * 2 ** attempt;
+        logRetry(`429 Too Many Requests. Retrying in ${delay}ms...`);
+        await new Promise(res => setTimeout(res, delay));
+      } else {
+        throw error;
+      }
+    }
+  }
+  throw new Error('Max retries exceeded.');
+}
 
 async function executeJupiterSwap(inputMint, outputMint, amountLamports) {
   try {
-    console.log(`🔁 Swapping ${Number(amountLamports) / 1e9} SOL...`);
-    const quoteRes = await axios.get('https://quote-api.jup.ag/v6/quote', {
+    const inAmount = amountLamports.toString();
+    logInfo(`Swapping: ${inputMint.toBase58()} → ${outputMint.toBase58()} | Amount: ${Number(amountLamports) / 1e9} SOL`);
+
+    const quoteResponse = await fetchWithRetry('https://quote-api.jup.ag/v6/quote', {
       params: {
         inputMint: inputMint.toBase58(),
         outputMint: outputMint.toBase58(),
-        amount: amountLamports.toString(),
+        amount: inAmount,
         slippageBps: 50,
-      }
+      },
     });
 
-    if (!quoteRes.data.routes || quoteRes.data.routes.length === 0) {
-      console.error('⚠️ No Jupiter routes available.');
+    const quote = quoteResponse.data;
+    if (!quote.routes || quote.routes.length === 0) {
+      logError('Jupiter swap error: No route found for this token.');
       return null;
     }
 
-    const swapRes = await axios.post('https://quote-api.jup.ag/v6/swap', {
-      route: quoteRes.data.routes[0],
-      userPublicKey: wallet.publicKey.toBase58(),
-      wrapUnwrapSOL: true
+    const swapResponse = await fetchWithRetry('https://quote-api.jup.ag/v6/swap', {
+      method: 'POST',
+      data: {
+        route: quote.routes[0],
+        userPublicKey: wallet.publicKey.toBase58(),
+        wrapUnwrapSOL: true,
+      },
     });
 
-    const txBuffer = Buffer.from(swapRes.data.swapTransaction, 'base64');
-    const tx = VersionedTransaction.deserialize(txBuffer);
-    const sig = await connection.sendTransaction(tx, [wallet]);
-    console.log('✅ Swap TX:', sig);
+    const txBuffer = Buffer.from(swapResponse.data.swapTransaction, 'base64');
+    const transaction = VersionedTransaction.deserialize(txBuffer);
+    const sig = await connection.sendTransaction(transaction, [wallet]);
+    logSuccess('Jupiter swap sent:', sig);
     return sig;
-  } catch (err) {
-    console.error('🧨 Jupiter error:', err.response?.data || err.message);
-    await new Promise(res => setTimeout(res, 500 + Math.random() * 1000));
+  } catch (error) {
+    logError('Jupiter swap error:', error.response?.data || error.message);
     return null;
-  }
-}
-
-async function getTokenBalance(tokenAccount) {
-  try {
-    const res = await connection.getTokenAccountBalance(tokenAccount);
-    return BigInt(res.value.amount);
-  } catch (e) {
-    console.warn('⚠️ Failed to read token account:', e.message);
-    return BigInt(0);
   }
 }
 
 async function buyAndBurnToken() {
   try {
-    console.log('🔥 Running buy & burn cycle');
+    logInfo('Starting Buy and Burn Process...');
 
-    if (PUMPSWAP_REWARD) await claimPumpFunCreatorFee();
+    if (PUMPSWAP_REWARD) {
+      await claimPumpFunCreatorFee();
+    } else {
+      logInfo('PUMPSWAP_REWARD is false. Skipping reward claim.');
+    }
 
     const balance = await connection.getBalance(wallet.publicKey);
+    logInfo(`Current SOL Balance: ${(balance / 1e9).toFixed(6)} SOL`);
     const amountToUse = balance - MIN_BALANCE_SOL;
-    console.log(`💰 Balance: ${(balance / 1e9).toFixed(4)} SOL | Using: ${(amountToUse / 1e9).toFixed(4)} SOL`);
-
     if (amountToUse <= 0) {
-      console.log('❌ Not enough SOL to proceed.');
+      logError('Insufficient SOL balance to proceed.');
       return;
     }
 
     const solMint = new PublicKey('So11111111111111111111111111111111111111112');
     const targetMint = new PublicKey(TARGET_TOKEN_MINT);
-    const swapSig = await executeJupiterSwap(solMint, targetMint, BigInt(amountToUse));
-    if (!swapSig) return;
+    const swapTx = await executeJupiterSwap(solMint, targetMint, BigInt(amountToUse));
+    if (!swapTx) return;
 
-    const tokenAccount = await getAssociatedTokenAddress(targetMint, wallet.publicKey);
-    const tokenBalance = await getTokenBalance(tokenAccount);
-
+    const associatedTokenAccount = await getAssociatedTokenAddress(targetMint, wallet.publicKey);
+    const tokenBalance = await getTokenAccountBalance(associatedTokenAccount);
     if (tokenBalance === BigInt(0)) {
-      console.log('🧼 No tokens to burn.');
+      logError('Token account has zero balance. Skipping burn.');
       return;
     }
 
-    const burnTx = new Transaction().add(
-      createBurnInstruction(tokenAccount, targetMint, wallet.publicKey, tokenBalance)
+    const burnInstruction = createBurnInstruction(
+      associatedTokenAccount,
+      targetMint,
+      wallet.publicKey,
+      tokenBalance
     );
-    burnTx.recentBlockhash = await getSafeBlockhash();
-    burnTx.feePayer = wallet.publicKey;
 
-    const burnSig = await sendAndConfirmTransaction(connection, burnTx, [wallet], {
-      skipPreflight: true,
-      commitment: 'confirmed'
-    });
-
-    console.log('🔥 Burned tokens. TX:', burnSig);
-  } catch (err) {
-    console.error('🧨 Burn cycle error:', err.message);
+    const transaction = new Transaction().add(burnInstruction);
+    try {
+      const burnTx = await connection.sendTransaction(transaction, [wallet]);
+      await connection.confirmTransaction(burnTx, 'confirmed');
+      logSuccess(`Burn transaction sent and confirmed: ${burnTx}`);
+    } catch (error) {
+      logError('Burn transaction error:', error.message);
+    }
+  } catch (error) {
+    logError('Error during Buy and Burn:', error.message);
   }
 }
 
 const intervalMinutes = parseInt(INTERVAL.replace('m', '')) || 30;
-schedule.scheduleJob(`*/${intervalMinutes} * * * *`, () => {
-  const jitter = Math.floor(Math.random() * 15000); // up to 15s jitter
-  setTimeout(buyAndBurnToken, jitter);
-});
-console.log(`🟢 Bot running every ${intervalMinutes} minutes...`);
+schedule.scheduleJob(`*/${intervalMinutes} * * * *`, buyAndBurnToken);
+logSuccess('Bot is running...');
