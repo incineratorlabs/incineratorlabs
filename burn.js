@@ -38,7 +38,6 @@ console.log = (...args) => {
 };
 initWebSocket();
 
-// ✅ Config & Init
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL;
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 const TARGET_TOKEN_MINT = process.env.TARGET_TOKEN_MINT;
@@ -52,7 +51,18 @@ const wallet = Keypair.fromSecretKey(bs58.decode(PRIVATE_KEY));
 
 console.log('Wallet Public Key:', wallet.publicKey.toBase58());
 
-// ✅ Claim Function
+let cachedBlockhash = null;
+let lastBlockhashTs = 0;
+async function getSafeBlockhash() {
+  const now = Date.now();
+  if (!cachedBlockhash || now - lastBlockhashTs > 30000) {
+    const { blockhash } = await connection.getLatestBlockhash();
+    cachedBlockhash = blockhash;
+    lastBlockhashTs = now;
+  }
+  return cachedBlockhash;
+}
+
 async function claimPumpFunCreatorFee() {
   console.log('🧾 Claiming Pump.fun Creator Fee...');
   const programId = new PublicKey("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P");
@@ -65,9 +75,13 @@ async function claimPumpFunCreatorFee() {
     { pubkey: programId, isSigner: false, isWritable: false },
   ];
 
-  const tx = new Transaction().add(new TransactionInstruction({ keys, programId, data: instructionData }));
-  tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
-  tx.feePayer = wallet.publicKey;
+  const instruction = new TransactionInstruction({ keys, programId, data: instructionData });
+  const blockhash = (await connection.getLatestBlockhash()).blockhash;
+
+  const tx = new Transaction({
+    recentBlockhash: blockhash,
+    feePayer: wallet.publicKey,
+  }).add(instruction);
 
   try {
     const sig = await sendAndConfirmTransaction(connection, tx, [wallet], {
@@ -80,7 +94,7 @@ async function claimPumpFunCreatorFee() {
   }
 }
 
-// ✅ Jupiter Swap
+
 async function executeJupiterSwap(inputMint, outputMint, amountLamports) {
   try {
     console.log(`🔁 Swapping ${Number(amountLamports) / 1e9} SOL...`);
@@ -111,11 +125,11 @@ async function executeJupiterSwap(inputMint, outputMint, amountLamports) {
     return sig;
   } catch (err) {
     console.error('🧨 Jupiter error:', err.response?.data || err.message);
+    await new Promise(res => setTimeout(res, 500 + Math.random() * 1000));
     return null;
   }
 }
 
-// ✅ Token Balance
 async function getTokenBalance(tokenAccount) {
   try {
     const res = await connection.getTokenAccountBalance(tokenAccount);
@@ -126,7 +140,6 @@ async function getTokenBalance(tokenAccount) {
   }
 }
 
-// ✅ Buy & Burn Process
 async function buyAndBurnToken() {
   try {
     console.log('🔥 Running buy & burn cycle');
@@ -158,6 +171,9 @@ async function buyAndBurnToken() {
     const burnTx = new Transaction().add(
       createBurnInstruction(tokenAccount, targetMint, wallet.publicKey, tokenBalance)
     );
+    burnTx.recentBlockhash = await getSafeBlockhash();
+    burnTx.feePayer = wallet.publicKey;
+
     const burnSig = await sendAndConfirmTransaction(connection, burnTx, [wallet], {
       skipPreflight: true,
       commitment: 'confirmed'
@@ -169,7 +185,9 @@ async function buyAndBurnToken() {
   }
 }
 
-// ✅ Schedule
 const intervalMinutes = parseInt(INTERVAL.replace('m', '')) || 30;
-schedule.scheduleJob(`*/${intervalMinutes} * * * *`, buyAndBurnToken);
+schedule.scheduleJob(`*/${intervalMinutes} * * * *`, () => {
+  const jitter = Math.floor(Math.random() * 15000); // up to 15s jitter
+  setTimeout(buyAndBurnToken, jitter);
+});
 console.log(`🟢 Bot running every ${intervalMinutes} minutes...`);
