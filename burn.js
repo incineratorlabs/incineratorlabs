@@ -78,6 +78,23 @@ const wallet = Keypair.fromSecretKey(privateKeyArray);
 
 logInfo('Wallet Public Key:', wallet.publicKey.toBase58());
 
+async function rpcWithRetry(fn, maxRetries = 5, baseDelay = 500) {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (error.message.includes('429')) {
+        const delay = baseDelay * 2 ** attempt;
+        logRetry(`RPC 429 rate limit. Retrying in ${delay}ms...`);
+        await new Promise(res => setTimeout(res, delay));
+      } else {
+        throw error;
+      }
+    }
+  }
+  throw new Error('Max retries exceeded for RPC.');
+}
+
 async function getTokenAccountBalance(tokenAccount) {
   try {
     const accountInfo = await getAccount(connection, tokenAccount);
@@ -101,8 +118,9 @@ async function claimPumpFunCreatorFee() {
   ];
 
   const instruction = new TransactionInstruction({ keys, programId, data: instructionData });
+  const blockhash = (await rpcWithRetry(() => connection.getLatestBlockhash())).blockhash;
   const tx = new Transaction({
-    recentBlockhash: (await connection.getLatestBlockhash()).blockhash,
+    recentBlockhash: blockhash,
     feePayer: wallet.publicKey,
   }).add(instruction);
 
@@ -114,10 +132,14 @@ async function claimPumpFunCreatorFee() {
   }
 }
 
-async function fetchWithRetry(url, options = {}, maxRetries = 5, baseDelay = 500) {
+async function fetchWithRetry(method, url, options = {}, maxRetries = 5, baseDelay = 500) {
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
-      return await axios(url, options);
+      if (method === 'GET') {
+        return await axios.get(url, options);
+      } else if (method === 'POST') {
+        return await axios.post(url, options.data, options);
+      }
     } catch (error) {
       if (error.response?.status === 429) {
         const delay = baseDelay * 2 ** attempt;
@@ -136,7 +158,7 @@ async function executeJupiterSwap(inputMint, outputMint, amountLamports) {
     const inAmount = amountLamports.toString();
     logInfo(`Swapping: ${inputMint.toBase58()} → ${outputMint.toBase58()} | Amount: ${Number(amountLamports) / 1e9} SOL`);
 
-    const quoteResponse = await fetchWithRetry('https://quote-api.jup.ag/v6/quote', {
+    const quoteResponse = await fetchWithRetry('GET', 'https://quote-api.jup.ag/v6/quote', {
       params: {
         inputMint: inputMint.toBase58(),
         outputMint: outputMint.toBase58(),
@@ -151,8 +173,7 @@ async function executeJupiterSwap(inputMint, outputMint, amountLamports) {
       return null;
     }
 
-    const swapResponse = await fetchWithRetry('https://quote-api.jup.ag/v6/swap', {
-      method: 'POST',
+    const swapResponse = await fetchWithRetry('POST', 'https://quote-api.jup.ag/v6/swap', {
       data: {
         route: quote.routes[0],
         userPublicKey: wallet.publicKey.toBase58(),
@@ -208,7 +229,8 @@ async function buyAndBurnToken() {
       tokenBalance
     );
 
-    const transaction = new Transaction().add(burnInstruction);
+    const blockhash = (await rpcWithRetry(() => connection.getLatestBlockhash())).blockhash;
+    const transaction = new Transaction({ recentBlockhash: blockhash, feePayer: wallet.publicKey }).add(burnInstruction);
     try {
       const burnTx = await connection.sendTransaction(transaction, [wallet]);
       await connection.confirmTransaction(burnTx, 'confirmed');
