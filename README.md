@@ -106,6 +106,13 @@ pm2 restart incineratorlabs
 | `PUMPSWAP_REWARD`  | Set to `true` to claim Pump.fun creator reward before burn | `true` or `false`                          |
 
 ---
+## 🔑 Claim Requirements
+To successfully claim rewards, make sure the following accounts are provided and valid:
+- Creator Vault
+- Creator Token ATA (Associated Token Account)
+- Fee Vault
+- Token Program
+- Event Authority
 
 ## 🛠️ Tech Stack
 - Node.js - Backend runtime
